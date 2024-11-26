@@ -6,27 +6,26 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <stdlib.h>
 
 
-char* load_html_site(const char* filename)
+char* load_file(const char* filename, long* filesize)
 {
     FILE* filepointer = fopen(filename, "r");
     if (filepointer == NULL)
     {
-        perror("couldnt open file");
+        perror("couldn't open file");
         return NULL;
     }
 
     //get filesize fseek->sets filepointer to the end, ftell->gives curr position, rewind->sets filepointer to the start
     fseek(filepointer, 0, SEEK_END);
-    long filesize = ftell(filepointer);
+    *filesize = ftell(filepointer);
     rewind(filepointer);
 
-
-    char* buffer = malloc(filesize + 1);
+    char* buffer = malloc(*filesize + 1);
     if (buffer == NULL)
     {
         perror("allocation failed");
@@ -34,11 +33,24 @@ char* load_html_site(const char* filename)
         return NULL;
     }
 
-    fread(buffer, 1, filesize, filepointer);
-    buffer[filesize] = '\0'; // null terminating string
+    fread(buffer, 1, *filesize, filepointer);
+    buffer[*filesize] = '\0'; // null terminating string
     fclose(filepointer);
 
     return buffer;
+}
+
+// function for getting the mime type
+const char* get_mime_type(const char* path)
+{
+    const char* ext = strrchr(path, '.');
+    if (ext == NULL)
+        return "application/octet-stream"; // fallback
+
+    if (strcmp(ext, ".html") == 0) return "text/html";
+    if (strcmp(ext, ".css") == 0) return "text/css";
+
+    return "application/octet-stream"; // fallback
 }
 
 
@@ -72,21 +84,18 @@ int main(int argc, char** argv)
         perror("failed to bind\n");
         return;
     }
-    if(listen(tcp_socketfd, 64) < 0)
+    if(listen(tcp_socketfd, 1000) < 0)
     {
         perror("failed to listen");
         return;
     }
+
     char buf[1024];
-    char response[] = "HTTP/1.0 200 OK\r\n"
-                "Server: webserver-c\r\n"
-                "Content-type: text/html\r\n\r\n"
-                "<html>hallo ursiiii</html>\r\n";
 
     struct sockaddr_in client_socket;
 
-    int count = 0;
-    while(count < 1)
+    //int count = 0;
+    while(1)
     {
         /* Await a connection on socket FD.
         When a connection arrives, open a new socket to communicate with it,
@@ -103,7 +112,7 @@ int main(int argc, char** argv)
             perror("accept failed\n");
             continue;
         }
-        count++;
+        //count++;
         printf("Connected client:\n");
         printf("IP Address: %s\n", inet_ntoa(client_socket.sin_addr));
         printf("Port: %u\n", ntohs(client_socket.sin_port));
@@ -113,15 +122,60 @@ int main(int argc, char** argv)
         //int clientinfo = getpeername(acceptfd, (struct sockaddr*)&client_socket, &addr_len_client);
         //printf("Client IP-Adresse: %s\n Client Port Nummer: %s\n", inet_ntoa(client_socket.sin_addr), ntohs(client_socket.sin_port));
         
-
-        uint32_t return_value_read = read(acceptfd, buf, sizeof(buf));   //number of bytes that where loaded into the buffer
+        char buf[1024];
+        uint32_t return_value_read = read(acceptfd, buf, sizeof(buf) - 1);   //returns number of bytes that where loaded into the buffer
         if (return_value_read < 0)
         {
             perror("read failed\n");
             return;
         }
 
-       char* html_content = load_html_site("/home/slobe/HTTP-Webserver/server/website/testsite.html");
+        buf[return_value_read] = '\0';
+        printf("Request:\n%s\n", buf);
+
+         // extract path from http request
+        char method[8], path[1024];
+        sscanf(buf, "%s %s", method, path);
+
+        // if path = /, go to index.html (standardpath)
+        if (strcmp(path, "/") == 0)
+            strcpy(path, "/index.html");
+
+
+        // create path if not standard lol
+        char full_path[2048];
+        snprintf(full_path, sizeof(full_path), "/home/slobe/HTTP-Webserver/server/website%s", path);
+
+        // MIME-Typ ermitteln
+        const char* mime_type = get_mime_type(full_path);
+
+        // Datei laden
+        long filesize;
+        char* file_content = load_file(full_path, &filesize);
+        if (file_content == NULL)
+        {
+            const char* error_response = "HTTP/1.1 404 Not Found\r\n"
+                                         "Content-Type: text/plain\r\n\r\n"
+                                         "404 Not Found";
+            write(acceptfd, error_response, strlen(error_response));
+            close(acceptfd);
+            continue;
+        }
+
+        // send HTTP response and filecontent
+        char response_header[256];
+        snprintf(response_header, sizeof(response_header),
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: %s\r\n"
+                 "Content-Length: %ld\r\n\r\n",
+                 mime_type, filesize);
+
+        write(acceptfd, response_header, strlen(response_header));
+        write(acceptfd, file_content, filesize);
+
+        free(file_content);
+
+       /*char* html_content = load_html_site("/home/slobe/HTTP-Webserver/server/website/testsite.html");
         if (html_content == NULL)
         {
             printf("Failed to load HTML site\n");
@@ -133,8 +187,9 @@ int main(int argc, char** argv)
                                  "Content-Type: text/html\r\n"
                                  "Content-Length: ";
 
+
         char content_length[16];
-        snprintf(content_length, sizeof(content_length), "%ld", strlen(html_content));
+        snprintf(content_length, sizeof(content_length), "%ld", strlen(html_content));      //itoa >>> snprintf   
 
         char response_end[] = "\r\n\r\n";
 
@@ -143,12 +198,12 @@ int main(int argc, char** argv)
         write(acceptfd, response_end, strlen(response_end));
         write(acceptfd, html_content, strlen(html_content));
 
-        free(html_content); 
+        free(html_content); */
         close(acceptfd);
 
     }
 
-
+    close(tcp_socketfd);
 
     return 0;
 }

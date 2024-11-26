@@ -3,6 +3,7 @@
         "server.h": "c",
         "stdbool.h": "c",
         "socket.h": "c",
-        "unistd.h": "c"
+        "unistd.h": "c",
+        "algorithm": "c"
     }
 }
