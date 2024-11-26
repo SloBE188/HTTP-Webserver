@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 #include <stdlib.h>
 
@@ -11,30 +12,77 @@
 
 int main(int argc, char** argv)
 {
-    struct sockaddr_in server_addr;
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);    //SOCK_STREAM = TCP, AF_INET = IPv4
-    if (server_fd < 0)
+
+    struct sockaddr_in server_socket;
+    int tcp_socketfd;
+
+    tcp_socketfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(tcp_socketfd < 0)
     {
-        perror("socket creation failed\n");
-        exit(EXIT_FAILURE);  
+        perror("failed creating the tcp socket");
+        return;
     }
 
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;   //server accepts connections from any netfork interface
-    server_addr.sin_port = 8080;
-    
-    if(bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0)
+    int opt = 1;
+    if (setsockopt(tcp_socketfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
-        perror("couldnt bind the socket to the address and port in the struct\n");
-        exit(EXIT_FAILURE);
+        perror("setsockopt failed");
+        return 1;
     }
 
-    int listening = listen(server_fd, 20);
-    if(listening < 0)
+    server_socket.sin_family = AF_INET;
+    server_socket.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_socket.sin_port = htons(8080);
+
+    if(bind(tcp_socketfd, (struct sockaddr*)&server_socket, sizeof(struct sockaddr)) < 0)
     {
-        perror("listening failed\n");
-        exit(EXIT_FAILURE);
+        perror("failed to bind\n");
+        return;
     }
+    if(listen(tcp_socketfd, 64) < 0)
+    {
+        perror("failed to listen");
+        return;
+    }
+    char* buf[1024];
+    char response[] = "HTTP/1.0 200 OK\r\n"
+                "Server: webserver-c\r\n"
+                "Content-type: text/html\r\n\r\n"
+                "<html>hallo ursiiii</html>\r\n";
+    while(1)
+    {
+        /* Await a connection on socket FD.
+        When a connection arrives, open a new socket to communicate with it,
+        set *ADDR (which is *ADDR_LEN bytes long) to the address of the connecting
+        peer and *ADDR_LEN to the address's actual length, and return the
+        new socket's descriptor, or -1 for errors.
+
+        This function is a cancellation point and therefore not marked with
+        __THROW.  */
+        socklen_t addr_len = sizeof(struct sockaddr);
+        int acceptfd = accept(tcp_socketfd, (struct sockaddr*)&server_socket, &addr_len);
+        if (acceptfd < 0)
+        {
+            perror("accept failed\n");
+            return;
+        }
+        printf("accept succesfull\n");
+
+        uint32_t return_value = read(acceptfd, buf, sizeof(buf));   //number of bytes that where loaded into the buffer
+        if (return_value < 0)
+        {
+            perror("read failed\n");
+            return;
+        }
+
+        uint32_t response_value = write(acceptfd, &response, sizeof(response));     //number of byter written
+        
+
+        close(acceptfd);
+
+    }
+
+
 
     return 0;
 }
