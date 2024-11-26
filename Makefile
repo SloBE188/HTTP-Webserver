@@ -1,8 +1,8 @@
-FILES= ./build/server/server.o
+FILES= ./build/server/webserver
 all: $(FILES)
-
-./build/server/server.o:
-	gcc -c ./server/server.c -o ./build/server/server.o
+	mv build/server/webserver /home/slobe/HTTP-Webserver
+./build/server/webserver:
+	gcc ./server/server.c -o ./build/server/webserver
 
 clean:
-	rm -rf $(FILES)
+	rm -rf webserver
